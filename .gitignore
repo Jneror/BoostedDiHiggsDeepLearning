@@ -1,6 +1,7 @@
 #data folders
 data/
 processed_data/
+raw_data/
 
 #ipycheckpoints
 .ipynb_checkpoints
