@@ -16,8 +16,10 @@ def root_to_df(file):
 
 def gen_signal_datasets(signal, data_path, prodata_path):
     #get roots
+    all_roots = glob(f"{data_path}/*.root")
     signal_roots = glob(f"{data_path}/{signal}*.root")
-    bg_roots = glob(f"{data_path}/[!({signal})(data)]*.root")
+    bg_roots = list(set(all_roots) - set(signal_roots) - set(glob(f"{data_path}/data.root")))
+    print(bg_roots)
     
     #turn into dfs
     signal_dfs = {signal_root.split('/')[-1][:-5]: root_to_df(signal_root) for signal_root in signal_roots}
@@ -50,6 +52,10 @@ def drop_fakes(df):
     """Return df without fake samples"""
     #display(df[(df["sample"] == "fakes") & (df["EventWeight"] > 0)])
     return df[df["sample"] != "fakes"].reset_index(drop = True)
+
+def drop_twodim(df):
+    """Return df without TwoDimMassWindow Region events"""
+    return df[df["m_region"] != "TwoDimMassWindow"].reset_index(drop = True)
 
 def classify_events(df, signal, class_column):
     df[class_column] = (df["sample"].str.contains(f".*{signal}[^0-9]*",regex = True)).astype(int)
