@@ -19,7 +19,6 @@ def gen_signal_datasets(signal, data_path, prodata_path):
     all_roots = glob(f"{data_path}/*.root")
     signal_roots = glob(f"{data_path}/{signal}*.root")
     bg_roots = list(set(all_roots) - set(signal_roots) - set(glob(f"{data_path}/data.root")))
-    print(bg_roots)
     
     #turn into dfs
     signal_dfs = {signal_root.split('/')[-1][:-5]: root_to_df(signal_root) for signal_root in signal_roots}
@@ -60,6 +59,48 @@ def drop_twodim(df):
 def classify_events(df, signal, class_column):
     df[class_column] = (df["sample"].str.contains(f".*{signal}[^0-9]*",regex = True)).astype(int)
     return df
+
+#####################
+### Info datasets ###
+#####################
+
+def wavg(df, x_col, weight_col):
+    """ http://stackoverflow.com/questions/10951341/pandas-dataframe-aggregate-function-using-multiple-columns
+    In rare instance, we may not have weights, so just return the mean. Customize this if your business case
+    should return otherwise.
+    x * w / sum(w)
+    """
+    x = df[x_col]
+    w = df[weight_col]
+    try:
+        return (x * w).sum() / w.sum()
+    except ZeroDivisionError:
+        return x.mean()
+
+def signal_density(df, signal_col):
+    """Returns the class 1 count divided by the total count (class 1 and class 0)"""
+    classes = df[signal_col]
+    return classes.sum()/classes.count()
+
+def signal_count(df, signal_col):
+    """Returns the amount of signal (class 1) in a dataset"""
+    return df[signal_col].sum()
+
+def total_count(df):
+    """Returns the amount of data in a dataset"""
+    return df.shape[0]
+
+def signal_distribution(df, signal_col, weight_col):
+    """Returns info about the signal (class 1) in a dataset"""
+    return pd.Series(
+        [
+            wavg(df, signal_col, weight_col),
+            signal_density(df, signal_col),
+            signal_count(df, signal_col),
+            total_count(df),
+        ],
+        index = ["signal w-density", "signal density", "signal count", "total count"]
+    )
 
 
 
