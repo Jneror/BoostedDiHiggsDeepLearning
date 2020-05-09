@@ -13,8 +13,12 @@ Merge signal roots with background ones.
 
 In the folder containing the script run:
 
-> $ ./gen_root_datasets.sh \<signal\> \<root_files_dir\> \<out_dir\>
+```console
+foo@bar:~$ ./gen_root_datasets.sh <signal> <root_files_dir> <out_dir>
+```
 
-For example, for our project we would want to run:
+For example, for our project we run:
 
-> $ ./gen_root_datasets.sh Xtohh ../raw_data ../processed_data
+```console
+foo@bar:~$ ./gen_root_datasets.sh Xtohh ../raw_data ../processed_data
+```
