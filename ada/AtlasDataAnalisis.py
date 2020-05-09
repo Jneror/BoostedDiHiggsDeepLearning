@@ -21,7 +21,8 @@ def gen_signal_datasets(signal, data_path, prodata_path):
     bg_roots = list(set(all_roots) - set(signal_roots) - set(glob(f"{data_path}/data.root")))
     
     #turn into dfs
-    signal_dfs = {signal_root.split('/')[-1][:-5]: root_to_df(signal_root) for signal_root in signal_roots}
+    #drop fakes in signal, but not in bg
+    signal_dfs = {signal_root.split('/')[-1][:-5]: drop_fakes(root_to_df(signal_root)) for signal_root in signal_roots}
     bg_dfs = [root_to_df(bg_root) for bg_root in bg_roots]
     
     #join all backgrounds
