@@ -2,6 +2,7 @@
 data/
 processed_data/
 raw_data/
+bdt_output/
 
 #ipycheckpoints
 .ipynb_checkpoints
@@ -136,3 +137,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Mac OS X folders
+.DS_Store
