@@ -103,6 +103,10 @@ def signal_distribution(df, signal_col, weight_col):
         index = ["signal w-density", "signal density", "signal count", "total count"]
     )
 
+def signal_distribution_per(df, cols, signal_col = "signal", weight_col = "EventWeight"):
+    """Returns density information about the signal per every feature in cols"""
+    return df.groupby(cols).apply(signal_distribution, signal_col, weight_col)
+
 
 
         
