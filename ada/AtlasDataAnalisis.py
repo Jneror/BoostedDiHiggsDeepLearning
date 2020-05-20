@@ -3,6 +3,8 @@ import pandas as pd
 from root_numpy import tree2array
 from os import path
 from glob import glob
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 ####################
 ### Gen Datasets ###
@@ -108,5 +110,108 @@ def signal_distribution_per(df, cols, signal_col = "signal", weight_col = "Event
     return df.groupby(cols).apply(signal_distribution, signal_col, weight_col)
 
 
+#################
+### Training ####
+#################
 
-        
+def pop_col(X, col):
+    """Returns the popped column with the new dataframe"""
+    #pandas has a pop column but modifies the original dataframe, which i dont want
+    return X[col], X.drop(columns = [col])
+
+def train_val_test_split(df_X, df_y, train_size, val_size, test_size,
+    pop_w = True, w_col = "EventWeight", seed = 1):
+
+    """Split dataframe into train, test and val datasets.
+    If pop_w is True, then the weights column is separated from the X datasets"""
+
+    if train_size + val_size + test_size != 1.0:
+        print("Incorrect sizes!")
+        return None
+    
+    X_tmp, X_test, y_tmp, y_test = train_test_split(
+        df_X,
+        df_y,
+        test_size = test_size,
+        shuffle = True,
+        random_state = seed
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_tmp,
+        y_tmp,
+        test_size = val_size/(test_size + train_size),
+        shuffle = True,
+        random_state = seed
+    )
+
+    if pop_w:
+        w_train, X_train = pop_col(X_train, w_col)
+        w_val, X_val = pop_col(X_val, w_col)
+        w_test, X_test = pop_col(X_test, w_col)
+        return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+def get_trainvaltest_from_dataset(data_path, signal, region = "SR", tag = 1,
+    train_size = 0.6, val_size = 0.2, test_size = 0.2, seed = 1):
+
+    if region not in {"SR", "QCDCR"}:
+        print("Error: Region not valid!")
+        return
+    
+    if tag not in {0, 1, 2}:
+        print("Error: Tag not valid")
+        return
+    
+    if train_size + val_size + test_size != 1.0:
+        print("Error: Datasets sizes dont add 1")
+        return
+
+    if not path.exists(f"{data_path}/{signal}.csv"):
+        print("Error: Dataset not found")
+        return
+
+    #import dataset
+    data = pd.read_csv(f"{data_path}/{signal}.csv")
+
+    #drop two dim, filter region and tag
+    data = filter_tag(filter_region(drop_twodim(data), region), tag)
+
+    #classify (label)
+    data = classify_events(data, signal, "label")
+
+    #features selected by domain expert
+    selected_features = ['m_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
+    'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt', "label"]
+
+    data = data[["EventWeight"] + selected_features]
+
+    df_X = data.drop(columns = ["label"])
+    df_y = data["label"]
+
+    #split dataset
+    X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test = train_val_test_split(
+        df_X,
+        df_y,
+        train_size, #train
+        val_size, #val
+        test_size, #test
+        seed = seed
+    )
+
+    scaler = StandardScaler().fit(X_train)
+    X_train = pd.DataFrame(scaler.transform(X_train),columns=X_train.columns)
+    X_val = pd.DataFrame(scaler.transform(X_val),columns=X_val.columns)
+    X_test = pd.DataFrame(scaler.transform(X_test),columns=X_test.columns)
+
+    #reshape ys and ws
+    y_train = y_train.values.reshape(-1, 1)
+    y_val = y_val.values.reshape(-1, 1)
+    y_test = y_test.values.reshape(-1, 1)
+
+    w_train = w_train.values
+    w_val = w_val.values
+    w_test = w_test.values
+
+    return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
+
