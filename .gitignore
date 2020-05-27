@@ -140,3 +140,7 @@ dmypy.json
 
 # Mac OS X folders
 .DS_Store
+
+# notebooks
+notebooks/2020-05-22-JRO-KFold.ipynb
+notebooks/2020-05-22-JRO-Testing.ipynb

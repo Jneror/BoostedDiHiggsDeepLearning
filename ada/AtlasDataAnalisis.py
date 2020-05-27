@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 #dnn
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (classification_report, confusion_matrix, roc_curve, roc_auc_score,
+    precision_recall_curve, average_precision_score)
 from keras.models import model_from_json
 #abstract classes
 from abc import ABC, abstractmethod
@@ -113,7 +114,9 @@ def signal_distribution(df, signal_col, weight_col):
 
 def signal_distribution_per(df, cols, signal_col = "signal", weight_col = "EventWeight"):
     """Returns density information about the signal per every feature in cols"""
-    return df.groupby(cols).apply(signal_distribution, signal_col, weight_col)
+    if cols != []:
+        return df.groupby(cols).apply(signal_distribution, signal_col, weight_col)
+    return df.apply(signal_distribution, signal_col, weight_col)
 
 
 #################
@@ -158,14 +161,14 @@ def train_val_test_split(df_X, df_y, train_size, val_size, test_size,
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
-def get_trainvaltest_from_dataset(data_path, signal, region = "SR", tag = 1,
-    train_size = 0.6, val_size = 0.2, test_size = 0.2, seed = 1):
+def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
+    train_size = 0.6, val_size = 0.2, test_size = 0.2, seed = 420):
 
-    if region not in {"SR", "QCDCR"}:
+    if region not in {"SR", "QCDCR", None}:
         print("Error: Region not valid!")
         return
     
-    if tag not in {0, 1, 2}:
+    if tag not in {0, 1, 2, None}:
         print("Error: Tag not valid")
         return
     
@@ -180,8 +183,15 @@ def get_trainvaltest_from_dataset(data_path, signal, region = "SR", tag = 1,
     #import dataset
     data = pd.read_csv(f"{data_path}/{signal}.csv")
 
-    #drop two dim, filter region and tag
-    data = filter_tag(filter_region(drop_twodim(data), region), tag)
+    #drop two dim
+    data = drop_twodim(data)
+
+    #filter region and tag
+    if region is not None:
+        data = filter_region(data, region)
+
+    if tag is not None:
+        data = filter_tag(data, tag)
 
     #classify (label)
     data = classify_events(data, signal, "label")
@@ -220,3 +230,161 @@ def get_trainvaltest_from_dataset(data_path, signal, region = "SR", tag = 1,
     w_test = w_test.values
 
     return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
+
+##############
+### Models ###
+##############
+
+class DeepNeuralNetworkModel(ABC):
+    """Abstract mother of models"""
+
+    @abstractmethod
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs):
+        print("Implement!")
+    
+    @abstractmethod
+    def plot_training(self, width = 10, height = 6):
+        print("Implement!")
+
+    @abstractmethod
+    def save(self, directory, version):
+        print("Implement!")
+    
+    @abstractmethod
+    def load(self, directory, version):
+        print("Implement!")
+    
+    @abstractmethod
+    def evaluate(self, X_test, y_test, w_test):
+        print("Implement!")
+
+
+class KerasModelGamma(DeepNeuralNetworkModel):
+    """First stable version of the mother class for keras models"""
+    def __init__(self, n_input):
+        self.model = None
+        self.history = None
+        self.title = ""
+        self.model_name = ""
+    
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs):
+        if self.model is not None:
+            self.history = pd.DataFrame(self.model.fit(
+                X_train.values,
+                y_train,
+                sample_weight = w_train,
+                epochs = epochs,
+                verbose = 1,
+                validation_data = (
+                    X_val.values,
+                    y_val,
+                    w_val
+                )
+            ).history)
+        else:
+            print("Build your model first!")
+    
+    def plot_training(self, width = 10, height = 6):
+        #data
+        train_loss = self.history['loss']
+        val_loss = self.history['val_loss']
+        epochs = len(train_loss)
+        #plot
+        plt.figure(1, figsize=(width, height))
+        plt.plot(range(epochs), train_loss)
+        plt.plot(range(epochs), val_loss)
+        plt.ylabel("Loss")
+        plt.xlabel("Epoch")
+        plt.title("Training vs Validation Loss " + self.title)
+        plt.grid(True)
+        plt.legend(['Training', 'Validation'])
+        plt.show()
+    
+    def summary(self):
+        self.model.summary()
+    
+    def save(self, directory, version):
+        if self.model is not None:
+            print("modelo")
+            #save model
+            model_json = self.model.to_json()
+            with open(f"{directory}/{self.model_name}_v{version}.json", "w") as json_file:
+                json_file.write(model_json)
+                print("modelo")
+            #save weights
+            self.model.save_weights(f"{directory}/{self.model_name}_v{version}.h5")
+        if self.history is not None:
+            print("historia")
+            #save training data
+            with open(f"{directory}/{self.model_name}_v{version}.csv", mode='w') as f:
+                print("mas historia")
+                self.history.to_csv(f)
+
+    
+    def load(self, directory, version):
+        # load json and create model
+        if self.model is None:
+            json_file = open(f"{directory}/{self.model_name}_v{version}.json", 'r')
+            loaded_model_json = json_file.read()
+            json_file.close()
+            self.model = model_from_json(loaded_model_json)
+        #load weights
+        self.model.load_weights(f"{directory}/{self.model_name}_v{version}.h5")
+        #load train history
+        self.history = pd.read_csv(f"{directory}/{self.model_name}_v{version}.csv")
+    
+    def evaluate_with_weights(self, X_test, y_test, w_test, threshold = 0.4):
+        y_pred_prob = self.model.predict(X_test)
+        #parameter
+        y_pred = (y_pred_prob > threshold)
+
+        print("Classification Report")
+        print(classification_report(y_test, y_pred, sample_weight = w_test))
+        print("Confussion Matrix")
+        print(confusion_matrix(y_test, y_pred, sample_weight = w_test))
+    
+    def evaluate(self, X_test, y_test, threshold = 0.4):
+        y_pred_prob = self.model.predict(X_test)
+        #parameter
+        y_pred = (y_pred_prob > threshold)
+
+        print("Classification Report")
+        print(classification_report(y_test, y_pred))
+        print("Confussion Matrix")
+        print(confusion_matrix(y_test, y_pred))
+
+    def plot_roc(self, X_test, y_test):
+        y_scores = self.model.predict(X_test).ravel()
+
+        fpr, tpr, _ = roc_curve(y_test, y_scores)
+        roc_auc = roc_auc_score(y_test, y_scores)
+
+        plt.figure()
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.plot(fpr, tpr, label='{} (area = {:.3f})'.format(self.model_name, roc_auc))
+        plt.xlabel('False positive rate')
+        plt.ylabel('True positive rate')
+        plt.title('ROC curve')
+        plt.legend(loc='best')
+        plt.grid()
+        plt.show()
+
+        return fpr, tpr, roc_auc
+    
+    def plot_recall(self, X_test, y_test):
+        y_scores = self.model.predict(X_test).ravel()
+        precision, recall, _ = precision_recall_curve(y_test, y_scores)
+
+        prec_rec_auc = average_precision_score(y_test, y_scores)
+
+        plt.figure()
+        plt.plot([0, 1], [1, 0], 'k--')
+        plt.plot(recall, precision, label='{} (area = {:.3f})'.format(self.model_name, prec_rec_auc))
+        plt.xlabel('Precision')
+        plt.ylabel('Recall')
+        plt.title('Precision-recall curve')
+        plt.legend(loc='best')
+        plt.grid()
+        plt.show()
+
+        return precision, recall, prec_rec_auc
