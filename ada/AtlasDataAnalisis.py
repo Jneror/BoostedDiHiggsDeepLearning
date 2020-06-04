@@ -126,7 +126,7 @@ def signal_distribution_per(df, cols, signal_col = "signal", weight_col = "Event
 def pop_col(X, col):
     """Returns the popped column with the new dataframe"""
     #pandas has a pop column but modifies the original dataframe, which i dont want
-    return X[col], X.drop(columns = [col])
+    return X[col].values, X.drop(columns = [col])
 
 def train_val_test_split(df_X, df_y, train_size, val_size, test_size,
     pop_w = True, w_col = "EventWeight", seed = 1):
@@ -231,6 +231,102 @@ def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
 
     return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
 
+def get_trainvaltest_from_csv(data_path, signal, seed, region = None, tag = None, train_size = 0.6,
+val_size = 0.2, test_size = 0.2, w_col = "EventWeight", region_col = "m_region", tag_col = "m_FJNbtagJets"):
+
+    if region not in {"SR", "QCDCR", None}:
+        print("Error: Region not valid!")
+        return
+
+    if tag not in {0, 1, 2, None}:
+        print("Error: Tag not valid")
+        return
+
+    if train_size + val_size + test_size != 1.0:
+        print("Error: Datasets sizes dont add 1")
+        return
+
+    if not path.exists(f"{data_path}/{signal}.csv"):
+        print("Error: Dataset not found")
+        return
+
+    #import dataset
+    data = pd.read_csv(f"{data_path}/{signal}.csv")
+
+    #drop two dim
+    data = drop_twodim(data)
+
+    #filter region and tag
+    data = filter_region(data, region)
+
+    #classify (label)
+    data = classify_events(data, signal, "label")
+
+    #features selected by domain expert
+    selected_features = ['m_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
+    'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt', "label"]
+
+    cols_to_pop = [w_col]
+    if tag is None: cols_to_pop.append(tag_col)
+    if region is None: cols.to_pop.append(region_col)
+
+    data = data[cols_to_pop + selected_features]
+
+    df_X = data.drop(columns = ["label"])
+    df_y = data["label"]
+
+    splitted_data = {
+        "train": {},
+        "test": {},
+        "val": {},
+    }
+
+    #split dataset
+    X_tmp, X_test, y_tmp, y_test = train_test_split(
+        df_X,
+        df_y,
+        test_size = test_size,
+        shuffle = True,
+        random_state = seed
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_tmp,
+        y_tmp,
+        test_size = val_size/(test_size + train_size),
+        shuffle = True,
+        random_state = seed
+    )
+
+    #get weights
+    splitted_data["train"]["w"], X_train = pop_col(X_train, w_col)
+    splitted_data["val"]["w"], X_val = pop_col(X_val, w_col)
+    splitted_data["test"]["w"], X_test = pop_col(X_test, w_col)
+
+    #get tags
+    if tag is None:
+        splitted_data["train"]["tag"], X_train = pop_col(X_train, tag_col)
+        splitted_data["val"]["tag"], X_val = pop_col(X_val, tag_col)
+        splitted_data["test"]["tag"], X_test = pop_col(X_test, tag_col)
+
+    #get regions
+    if region is None:
+        splitted_data["train"]["region"], X_train = pop_col(X_train, region_col)
+        splitted_data["val"]["region"], X_val = pop_col(X_val, region_col)
+        splitted_data["test"]["region"], X_test = pop_col(X_test, region_col)
+
+    #normalize
+    scaler = StandardScaler().fit(X_train)
+    splitted_data["train"]["x"] = pd.DataFrame(scaler.transform(X_train),columns=X_train.columns)
+    splitted_data["val"]["x"] = pd.DataFrame(scaler.transform(X_val),columns=X_val.columns)
+    splitted_data["test"]["x"] = pd.DataFrame(scaler.transform(X_test),columns=X_test.columns)
+
+    #reshape ys and ws
+    splitted_data["train"]["y"] = y_train.values.reshape(-1, 1)
+    splitted_data["val"]["y"] = y_val.values.reshape(-1, 1)
+    splitted_data["test"]["y"] = y_test.values.reshape(-1, 1)
+
+    return splitted_data
+
 ##############
 ### Models ###
 ##############
@@ -321,7 +417,9 @@ class KerasModelGamma(DeepNeuralNetworkModel):
                 self.history.to_csv(f)
 
     
-    def load(self, directory, version):
+    def load(self, directory, version, model_name = None):
+        if model_name is not None:
+            self.model_name = model_name
         # load json and create model
         if self.model is None:
             json_file = open(f"{directory}/{self.model_name}_v{version}.json", 'r')
