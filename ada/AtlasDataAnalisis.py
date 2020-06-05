@@ -13,6 +13,16 @@ from keras.models import model_from_json
 #abstract classes
 from abc import ABC, abstractmethod
 
+##############
+### Config ###
+##############
+
+col_names = {
+    "region": "m_region",
+    "tag": "m_FJNbtagJets",
+    "weight": "EventWeight",
+}
+
 ####################
 ### Gen Datasets ###
 ####################
@@ -67,8 +77,47 @@ def drop_twodim(df):
     return df[df["m_region"] != "TwoDimMassWindow"].reset_index(drop = True)
 
 def classify_events(df, signal, class_column):
+    """Binary classifying of events"""
     df[class_column] = (df["sample"].str.contains(f".*{signal}[^0-9]*",regex = True)).astype(int)
     return df
+
+def preprocess_df(df, signal, class_col = "label", region = None, tag = None):
+    """Preprocess: drop two dim, filter region if any, filter tag if any and classify signals"""
+    #drop twodim region, because we are not going to use it
+    df = drop_twodim(df)
+    if region is not None: df = filter_region(df, region)
+    if tag is not None: df = filter_tag(df, tag)
+    return classify_events(df, signal, class_col)
+
+def trainvaltest_split(x, y, seed, train_size, val_size, test_size):
+    """Split x and y into train, val and test datasets"""
+    x_tmp, x_test, y_tmp, y_test = train_test_split(
+        x,
+        y,
+        test_size = test_size,
+        shuffle = True,
+        random_state = seed
+    )
+    x_train, x_val, y_train, y_val = train_test_split(
+        x_tmp,
+        y_tmp,
+        test_size = val_size/(test_size + train_size),
+        shuffle = True,
+        random_state = seed
+    )
+    return x_train, x_val, x_test, y_train, y_val, y_test
+
+def pop_col_from_dfs(dfs, col):
+    """Drop the column from a list of dfs and return this columns in form of array"""
+    popped_cols = [df.pop(col).values for df in dfs]
+    return popped_cols
+
+def standar_scale_dfs(dfs):
+    scaler = StandardScaler().fit(dfs[0])
+    return [pd.DataFrame(scaler.transform(df),columns = df.columns) for df in dfs]
+
+def rotate_vectors(vectors):
+    return [v.reshape(-1, 1) for v in vectors]
 
 #####################
 ### Info datasets ###
@@ -231,101 +280,63 @@ def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
 
     return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
 
-def get_trainvaltest_from_csv(data_path, signal, seed, region = None, tag = None, train_size = 0.6,
-val_size = 0.2, test_size = 0.2, w_col = "EventWeight", region_col = "m_region", tag_col = "m_FJNbtagJets"):
+def get_trainvaltest_from_csv(data_path, signal, train_size, val_size, test_size, seed, region = None, tag = None):
+    #check errors
+    if region not in {"SR", "QCDCR", None}: print("Error: Region not valid!")
+    if tag not in {0, 1, 2, None}: print("Error: Tag not valid")
+    if train_size + val_size + test_size != 1.0: print("Error: Datasets sizes dont add 1")
+    if not path.exists(f"{data_path}/{signal}.csv"): print("Error: Dataset not found")
 
-    if region not in {"SR", "QCDCR", None}:
-        print("Error: Region not valid!")
-        return
+    #read csv
+    df = pd.read_csv(f"{data_path}/{signal}.csv")
 
-    if tag not in {0, 1, 2, None}:
-        print("Error: Tag not valid")
-        return
+    #preprocess
+    df = preprocess_df(df, signal, region = region, tag = tag, class_col = "label")
 
-    if train_size + val_size + test_size != 1.0:
-        print("Error: Datasets sizes dont add 1")
-        return
-
-    if not path.exists(f"{data_path}/{signal}.csv"):
-        print("Error: Dataset not found")
-        return
-
-    #import dataset
-    data = pd.read_csv(f"{data_path}/{signal}.csv")
-
-    #drop two dim
-    data = drop_twodim(data)
-
-    #filter region and tag
-    data = filter_region(data, region)
-
-    #classify (label)
-    data = classify_events(data, signal, "label")
-
-    #features selected by domain expert
+    #features
     selected_features = ['m_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
     'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt', "label"]
 
-    cols_to_pop = [w_col]
-    if tag is None: cols_to_pop.append(tag_col)
-    if region is None: cols.to_pop.append(region_col)
+    #columns to pop from the X set later
+    cols_to_pop = [col_names["weight"]]
+    if tag is None: cols_to_pop.append(col_names["tag"])
+    if region is None: cols_to_pop.append(col_names["region"])
 
-    data = data[cols_to_pop + selected_features]
+    #leave the selected features and the cols to pop later
+    df = df[cols_to_pop + selected_features]
 
-    df_X = data.drop(columns = ["label"])
-    df_y = data["label"]
+    #split into x and y
+    x = df.drop(columns = ["label"])
+    y = df["label"].values
 
-    splitted_data = {
-        "train": {},
-        "test": {},
-        "val": {},
-    }
+    #object where all the datasets will be stored
+    datasets = {}
 
-    #split dataset
-    X_tmp, X_test, y_tmp, y_test = train_test_split(
-        df_X,
-        df_y,
-        test_size = test_size,
-        shuffle = True,
-        random_state = seed
-    )
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_tmp,
-        y_tmp,
-        test_size = val_size/(test_size + train_size),
-        shuffle = True,
-        random_state = seed
-    )
+    #split into train, val and test datasets
+    x_train, x_val, x_test, y_train, y_val, y_test = trainvaltest_split(x, y, seed, 0.6, 0.2, 0.2)
 
-    #get weights
-    splitted_data["train"]["w"], X_train = pop_col(X_train, w_col)
-    splitted_data["val"]["w"], X_val = pop_col(X_val, w_col)
-    splitted_data["test"]["w"], X_test = pop_col(X_test, w_col)
+    #all the datasets for train, val and test will be stored here
+    w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
+    datasets["w"] = {"train": w_train, "val": w_val, "test": w_test}
 
-    #get tags
+    #pop filter and tag column if there are no filters
     if tag is None:
-        splitted_data["train"]["tag"], X_train = pop_col(X_train, tag_col)
-        splitted_data["val"]["tag"], X_val = pop_col(X_val, tag_col)
-        splitted_data["test"]["tag"], X_test = pop_col(X_test, tag_col)
+        tags = pop_col_from_dfs([x_train, x_val, x_test], col_names["tag"])
+        datasets["tag"] = {"train": tags[0], "val": tags[1], "test": tags[2]}
 
-    #get regions
     if region is None:
-        splitted_data["train"]["region"], X_train = pop_col(X_train, region_col)
-        splitted_data["val"]["region"], X_val = pop_col(X_val, region_col)
-        splitted_data["test"]["region"], X_test = pop_col(X_test, region_col)
+        regions = pop_col_from_dfs([x_train, x_val, x_test], col_names["region"])
+        datasets["region"] = {"train": regions[0], "val": regions[1], "test": regions[2]}
 
-    #normalize
-    scaler = StandardScaler().fit(X_train)
-    splitted_data["train"]["x"] = pd.DataFrame(scaler.transform(X_train),columns=X_train.columns)
-    splitted_data["val"]["x"] = pd.DataFrame(scaler.transform(X_val),columns=X_val.columns)
-    splitted_data["test"]["x"] = pd.DataFrame(scaler.transform(X_test),columns=X_test.columns)
+    #scale
+    x_train, x_val, x_test = standar_scale_dfs([x_train, x_val, x_test])
+    datasets["x"] = {"train": x_train, "val": x_val, "test": x_test}
 
-    #reshape ys and ws
-    splitted_data["train"]["y"] = y_train.values.reshape(-1, 1)
-    splitted_data["val"]["y"] = y_val.values.reshape(-1, 1)
-    splitted_data["test"]["y"] = y_test.values.reshape(-1, 1)
+    #reshape y
+    y_train, y_val, y_test = rotate_vectors([y_train, y_val, y_test])
+    datasets["y"] = {"train": y_train, "val": y_val, "test": y_test}
 
-    return splitted_data
+    return datasets
 
 ##############
 ### Models ###
