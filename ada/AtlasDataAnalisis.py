@@ -8,8 +8,12 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (classification_report, confusion_matrix, roc_curve, roc_auc_score,
-    precision_recall_curve, average_precision_score)
+precision_recall_curve, average_precision_score)
 from keras.models import model_from_json
+
+from keras.models import Sequential
+from keras.layers.core import Dense, Activation, Dropout
+from keras.optimizers import adagrad
 #abstract classes
 from abc import ABC, abstractmethod
 
@@ -338,9 +342,9 @@ def get_trainvaltest_from_csv(data_path, signal, train_size, val_size, test_size
 
     return datasets
 
-##############
-### Models ###
-##############
+#################
+### Models v1 ###
+#################
 
 class DeepNeuralNetworkModel(ABC):
     """Abstract mother of models"""
@@ -497,3 +501,234 @@ class KerasModelGamma(DeepNeuralNetworkModel):
         plt.show()
 
         return precision, recall, prec_rec_auc
+
+#################
+### Models v2 ###
+#################
+
+class ATLASModel(ABC):
+    """Abstract mother of models"""
+
+    @abstractmethod
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs):
+        print("Implement!")
+    
+    @abstractmethod
+    def plot_loss(self, width = 10, height = 6):
+        print("Implement!")
+    
+    @abstractmethod
+    def plot_acc(self, width = 10, height = 6):
+        print("Implement!")
+
+    @abstractmethod
+    def save(self, directory, version):
+        print("Implement!")
+    
+    @abstractmethod
+    def load(self, directory, version):
+        print("Implement!")
+
+class KerasModel(ATLASModel):
+    """Mother class for keras models"""
+    def __init__(self, n_input):
+        self.model = None
+        self.history = None
+        self.title = ""
+        self.model_name = ""
+    
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs):
+        if self.model is not None:
+            self.history = pd.DataFrame(self.model.fit(
+                X_train.values,
+                y_train,
+                sample_weight = w_train,
+                epochs = epochs,
+                verbose = 1,
+                validation_data = (
+                    X_val.values,
+                    y_val,
+                    w_val
+                )
+            ).history)
+        else:
+            print("Build your model first!")
+    
+    def plot_loss(self, width = 10, height = 6):
+        #data
+        train_loss = self.history['loss']
+        val_loss = self.history['val_loss']
+        epochs = len(train_loss)
+        #plot
+        plt.figure(1, figsize=(width, height))
+        plt.plot(range(epochs), train_loss)
+        plt.plot(range(epochs), val_loss)
+        plt.ylabel("Loss")
+        plt.xlabel("Epoch")
+        plt.title("Training vs Validation Loss " + self.title)
+        plt.grid(True)
+        plt.legend(['Training', 'Validation'])
+        plt.show()
+    
+    def plot_acc(self, width = 10, height = 6):
+        if 'acc' not in self.history:
+            print("No Accuracy metrics found!")
+            return
+        #data
+        train_loss = self.history['acc']
+        val_loss = self.history['val_acc']
+        epochs = len(train_loss)
+        #plot
+        plt.figure(1, figsize=(width, height))
+        plt.plot(range(epochs), train_loss)
+        plt.plot(range(epochs), val_loss)
+        plt.ylabel("Accuracy")
+        plt.xlabel("Epoch")
+        plt.title("Training vs Validation Accuracy " + self.title)
+        plt.grid(True)
+        plt.legend(['Training', 'Validation'])
+        plt.show()
+    
+    def summary(self):
+        self.model.summary()
+    
+    def save(self, directory, version):
+        if self.model is not None:
+            print("modelo")
+            #save model
+            model_json = self.model.to_json()
+            with open(f"{directory}/{self.model_name}_v{version}.json", "w") as json_file:
+                json_file.write(model_json)
+                print("modelo")
+            #save weights
+            self.model.save_weights(f"{directory}/{self.model_name}_v{version}.h5")
+        if self.history is not None:
+            print("historia")
+            #save training data
+            with open(f"{directory}/{self.model_name}_v{version}.csv", mode='w') as f:
+                print("mas historia")
+                self.history.to_csv(f)
+
+    
+    def load(self, directory, version, model_name = None):
+        if model_name is not None:
+            self.model_name = model_name
+        # load json and create model
+        if self.model is None:
+            json_file = open(f"{directory}/{self.model_name}_v{version}.json", 'r')
+            loaded_model_json = json_file.read()
+            json_file.close()
+            self.model = model_from_json(loaded_model_json)
+        #load weights
+        self.model.load_weights(f"{directory}/{self.model_name}_v{version}.h5")
+        #load train history
+        self.history = pd.read_csv(f"{directory}/{self.model_name}_v{version}.csv")
+
+class Autoencoder(KerasModel):
+    def __init__(self, n_input):
+        super().__init__(n_input)
+
+    def fit(self, x_train, w_train, x_val, w_val, epochs):
+        super().fit(x_train, x_train, w_train, x_val, x_val, w_val, epochs)
+    
+    def evaluate(self, x_test):
+        loss, acc = (0, 0)
+        if self.model is not None:
+            loss, acc = self.model.evaluate(x_test, x_test, batch_size=128)
+        return loss, acc
+
+
+class BinaryClassifier(KerasModel):
+
+    def __init__(self, n_input):
+        super().__init__(n_input)
+
+    def evaluate_with_weights(self, X_test, y_test, w_test, threshold = 0.4):
+        y_pred_prob = self.model.predict(X_test)
+        #parameter
+        y_pred = (y_pred_prob > threshold)
+
+        print("Classification Report")
+        print(classification_report(y_test, y_pred, sample_weight = w_test))
+        print("Confussion Matrix")
+        print(confusion_matrix(y_test, y_pred, sample_weight = w_test))
+    
+    def evaluate(self, X_test, y_test, threshold = 0.4):
+        y_pred_prob = self.model.predict(X_test)
+        #parameter
+        y_pred = (y_pred_prob > threshold)
+
+        print("Classification Report")
+        print(classification_report(y_test, y_pred))
+        print("Confussion Matrix")
+        print(confusion_matrix(y_test, y_pred))
+
+    def plot_roc(self, X_test, y_test):
+        y_scores = self.model.predict(X_test).ravel()
+
+        fpr, tpr, _ = roc_curve(y_test, y_scores)
+        roc_auc = roc_auc_score(y_test, y_scores)
+
+        plt.figure()
+        plt.plot([0, 1], [0, 1], 'k--')
+        plt.plot(fpr, tpr, label='{} (area = {:.3f})'.format(self.model_name, roc_auc))
+        plt.xlabel('False positive rate')
+        plt.ylabel('True positive rate')
+        plt.title('ROC curve')
+        plt.legend(loc='best')
+        plt.grid()
+        plt.show()
+
+        #return fpr, tpr, roc_auc
+    
+    def plot_recall(self, X_test, y_test):
+        y_scores = self.model.predict(X_test).ravel()
+        precision, recall, _ = precision_recall_curve(y_test, y_scores)
+
+        prec_rec_auc = average_precision_score(y_test, y_scores)
+
+        plt.figure()
+        plt.plot([0, 1], [1, 0], 'k--')
+        plt.plot(recall, precision, label='{} (area = {:.3f})'.format(self.model_name, prec_rec_auc))
+        plt.xlabel('Precision')
+        plt.ylabel('Recall')
+        plt.title('Precision-recall curve')
+        plt.legend(loc='best')
+        plt.grid()
+        plt.show()
+
+        #return precision, recall, prec_rec_auc
+
+class BinaryClassifier1(BinaryClassifier):
+
+    def __init__(self, n_input):
+        #model
+        self.model = Sequential()
+        #input
+        self.model.add(Dense(32, input_dim = n_input, kernel_initializer='uniform',activation='softplus'))
+        #hidden layers
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(64, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(128, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(256, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(128, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(64, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(32, kernel_initializer='he_uniform', activation='softplus'))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(1, kernel_initializer='he_uniform', activation='sigmoid'))
+        #compile
+        self.model.compile(optimizer=adagrad(lr=0.05), loss='binary_crossentropy')
+
+        #title
+        self.title = 'optimizer: adagrad , lr = 0.05, loss = binary crossentropy'
+
+        #training
+        self.history = None
+
+        #name
+        self.model_name = "BC1"
