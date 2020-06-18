@@ -3,6 +3,7 @@ data/
 processed_data/
 raw_data/
 bdt_output/
+histograms/
 
 #ipycheckpoints
 .ipynb_checkpoints
