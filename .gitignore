@@ -4,6 +4,7 @@ processed_data/
 raw_data/
 bdt_output/
 histograms/
+saved_models/
 
 #ipycheckpoints
 .ipynb_checkpoints

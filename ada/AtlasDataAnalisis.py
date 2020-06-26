@@ -27,6 +27,11 @@ col_names = {
     "weight": "EventWeight",
 }
 
+selected_features = [
+    'm_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
+    'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt',
+]
+
 ####################
 ### Gen Datasets ###
 ####################
@@ -214,6 +219,7 @@ def train_val_test_split(df_X, df_y, train_size, val_size, test_size,
 
     return X_train, X_val, X_test, y_train, y_val, y_test
 
+#get data v1
 def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
     train_size = 0.6, val_size = 0.2, test_size = 0.2, seed = 420):
 
@@ -249,11 +255,7 @@ def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
     #classify (label)
     data = classify_events(data, signal, "label")
 
-    #features selected by domain expert
-    selected_features = ['m_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
-    'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt', "label"]
-
-    data = data[["EventWeight"] + selected_features]
+    data = data[["EventWeight", "label"] + selected_features]
 
     df_X = data.drop(columns = ["label"])
     df_y = data["label"]
@@ -284,6 +286,7 @@ def get_trainvaltest_from_dataset(data_path, signal, region = None, tag = None,
 
     return X_train, X_val, X_test, y_train, y_val, y_test, w_train, w_val, w_test
 
+#get data v2
 def get_trainvaltest_from_csv(data_path, signal, train_size, val_size, test_size, seed, region = None, tag = None):
     #check errors
     if region not in {"SR", "QCDCR", None}: print("Error: Region not valid!")
@@ -296,13 +299,9 @@ def get_trainvaltest_from_csv(data_path, signal, train_size, val_size, test_size
 
     #preprocess
     df = preprocess_df(df, signal, region = region, tag = tag, class_col = "label")
-
-    #features
-    selected_features = ['m_FJpt', 'm_FJeta', 'm_FJphi', 'm_FJm', 'm_DTpt', 'm_DTeta', 'm_DTphi', 'm_DTm',
-    'm_dPhiFTwDT', 'm_dRFJwDT', 'm_dPhiDTwMET', 'm_MET', 'm_hhm', 'm_bbttpt', "label"]
-
+    
     #columns to pop from the X set later
-    cols_to_pop = [col_names["weight"]]
+    cols_to_pop = [col_names["weight"], "label"]
     if tag is None: cols_to_pop.append(col_names["tag"])
     if region is None: cols_to_pop.append(col_names["region"])
 
@@ -341,6 +340,7 @@ def get_trainvaltest_from_csv(data_path, signal, train_size, val_size, test_size
     datasets["y"] = {"train": y_train, "val": y_val, "test": y_test}
 
     return datasets
+
 
 #################
 ### Models v1 ###
