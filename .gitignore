@@ -146,3 +146,10 @@ dmypy.json
 # notebooks
 notebooks/2020-05-22-JRO-KFold.ipynb
 notebooks/2020-05-22-JRO-Testing.ipynb
+results/Jun-2020/eval_AM1_tag2_jun_2020.json
+results/Jun-2020/eval_BCM1_paramtag0_jun_2020.json
+results/Jun-2020/eval_BCM1_paramtag1_jun_2020.json
+results/Jun-2020/eval_BCM1_paramtag2_jun_2020.json
+results/Jun-2020/eval_BCM1_tag0_jun_2020.json
+results/Jun-2020/eval_BCM1_tag1_jun_2020.json
+results/Jun-2020/eval_BCM1_tag2_jun_2020.json
