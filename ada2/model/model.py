@@ -16,6 +16,7 @@ from keras.models import model_from_json
 from sklearn.metrics import (classification_report, confusion_matrix, roc_curve, roc_auc_score,
 precision_recall_curve, average_precision_score)
 from sklearn.utils import shuffle
+from sklearn.metrics import f1_score
 
 #plot
 from matplotlib.colors import ListedColormap
@@ -32,13 +33,14 @@ class KerasModel(ABC):
         self.title = ""
         self.model_name = ""
     
-    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs):
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs, class_weights = {0:1, 1:1}, verbose = 1):
         if self.model is not None:
             self.history = pd.DataFrame(self.model.fit(
                 X_train.values, y_train, sample_weight = w_train,
                 epochs = epochs,
-                verbose = 1,
-                validation_data = (X_val.values, y_val, w_val)
+                verbose = verbose,
+                validation_data = (X_val.values, y_val, w_val),
+                class_weight = class_weights,
             ).history)
         else:
             print("Build your model first!")
@@ -50,19 +52,15 @@ class KerasModel(ABC):
     
     def save(self, directory, version):
         if self.model is not None:
-            print("modelo")
             #save model
             model_json = self.model.to_json()
             with open(f"{directory}/{self.model_name}_{version}.json", "w") as json_file:
                 json_file.write(model_json)
-                print("modelo")
             #save weights
             self.model.save_weights(f"{directory}/{self.model_name}_{version}.h5")
         if self.history is not None:
-            print("historia")
             #save training data
             with open(f"{directory}/{self.model_name}_{version}.csv", mode='w') as f:
-                print("mas historia")
                 self.history.to_csv(f)
     
     def load(self, directory, version, model_name = None):
@@ -83,6 +81,15 @@ class KerasModel(ABC):
     @abstractmethod
     def predict(self, x_test, th):
         print("Not implemented :(")
+    
+    #added on 29 Jun 2020
+    def f1(self, x_test, y_test, w_test, th):
+        #prediction
+        y_pred = self.predict(x_test, th)
+        #f1
+        f1_by_class = f1_score(y_test, y_pred, sample_weight = w_test, average = None)
+        f1_wavg = f1_score(y_test, y_pred, sample_weight = w_test, average='weighted')
+        return f1_by_class.tolist() + [f1_wavg, ]
     
     #added on Jun 2020
     def complete_evaluation(self, x_test, y_test, w_test, th, save = False, dest_path = ".", name = "v1"):
@@ -280,3 +287,65 @@ class AutoencoderModelV1(Autoencoder):
 
         #anomaly class
         self.anomaly_class = anomaly_class
+
+class BinClassifModel2(BinaryClassifier):
+
+    def __init__(self, n_input, lr, opti, acti, drop):
+        #model
+        self.model = Sequential()
+        #input
+        self.model.add(Dense(32, input_dim = n_input, kernel_initializer='uniform',activation=acti))
+        #hidden layers
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(256, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(32, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=drop))
+        self.model.add(Dense(1, kernel_initializer="he_uniform", activation='sigmoid'))
+        #compile
+        self.model.compile(optimizer=opti(lr=lr), loss='binary_crossentropy')
+
+        #training
+        self.history = None
+
+        #name
+        self.model_name = "BCM2"
+
+class BinClassifModel3(BinaryClassifier):
+
+    def __init__(self, n_input, lr, opti, acti):
+        #model
+        self.model = Sequential()
+        #input
+        self.model.add(Dense(32, input_dim = n_input, kernel_initializer='uniform',activation=acti))
+        #hidden layers
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(256, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(32, kernel_initializer="he_uniform", activation=acti))
+        self.model.add(Dropout(rate=0.2))
+        self.model.add(Dense(1, kernel_initializer="he_uniform", activation='sigmoid'))
+        #compile
+        self.model.compile(optimizer=opti(lr=lr), loss='binary_crossentropy')
+
+        #training
+        self.history = None
+
+        #name
+        self.model_name = "BCM3"
