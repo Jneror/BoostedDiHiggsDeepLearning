@@ -9,6 +9,7 @@ import json
 #sklearn
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils import shuffle
 
 from ada2 import col_names, selected_features, tags
 
@@ -157,6 +158,24 @@ def trainvaltest_split_bytag(x, y, seed, train_size, val_size, test_size):
     return (x_train.reset_index(drop=True), x_val.reset_index(drop=True), x_test.reset_index(drop=True),
     y_train, y_val, y_test)
 
+#added on ago 2020
+def trainvaltest_split_bymass(x, y, seed, train_size, val_size, test_size, masses):
+    x_mass = {mass: x[x["mass"] == mass] for mass in masses}
+    y_mass = {mass: y[x["mass"] == mass] for mass in masses}
+
+    x_train, x_val, x_test, y_train, y_val, y_test = ({},{},{},{},{},{})
+
+    for t in masses:
+        x_train[t], x_val[t], x_test[t], y_train[t], y_val[t], y_test[t] = trainvaltest_split(
+            x_mass[t], y_mass[t], seed, train_size, val_size, test_size
+        )
+    x_train, y_train = shuffle(pd.concat(x_train.values()),np.concatenate(list(y_train.values())),random_state=seed)
+    x_val, y_val = shuffle(pd.concat(x_val.values()),np.concatenate(list(y_val.values())),random_state=seed)
+    x_test, y_test =shuffle(pd.concat(x_test.values()),np.concatenate(list(y_test.values())),random_state=seed)
+
+    return (x_train.reset_index(drop=True), x_val.reset_index(drop=True), x_test.reset_index(drop=True),
+    y_train, y_val, y_test)
+
 #added on jun 2020
 def split_dataset(df, train_size, val_size, test_size, seed):
 
@@ -215,5 +234,39 @@ def split_dataset_bytag(df, train_size, val_size, test_size, seed):
         sets[tag]["w_test"] = pop_col_from_dfs([x_test], col_names["weight"])[0]
         sets[tag]["x_test"] = pd.DataFrame(scaler.transform(x_test),columns=x_test.columns)
         sets[tag]["y_test"] = rotate_vectors([y_test])[0]
+
+    return sets
+
+#added on ago 2020
+def split_dataset_bymass(df, train_size, val_size, test_size, seed, masses):
+    x = df.drop(columns = ["label"])
+    y = df["label"].values
+
+    x_train, x_val, x_test, y_train, y_val, y_test = trainvaltest_split_bymass(x,y,seed,train_size,val_size,test_size,masses)
+    x_test_bymass = {mass: x_test[x_test["mass"] == mass]  for mass in masses}
+    y_test_bymass = {mass: y_test[x_test["mass"] == mass]  for mass in masses}
+
+    #object where all the datasets will be stored
+    sets = {}
+
+    #all the sets for train, val and test will be stored here
+    w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
+    sets["w"] = {"train": w_train, "val": w_val, "test": w_test}
+
+    #scale
+    scaler = StandardScaler().fit(x_train)
+    x_train, x_val, x_test = [pd.DataFrame(scaler.transform(df),columns=df.columns) for df in [x_train, x_val, x_test]]
+    sets["x"] = {"train": x_train, "val": x_val, "test": x_test}
+
+    #reshape y
+    y_train, y_val, y_test = rotate_vectors([y_train, y_val, y_test])
+    sets["y"] = {"train": y_train, "val": y_val, "test": y_test}
+
+    for mass in masses:
+        sets[mass] = {}
+        x_test, y_test = (x_test_bymass[mass], y_test_bymass[mass])
+        sets[mass]["w_test"] = pop_col_from_dfs([x_test], col_names["weight"])[0]
+        sets[mass]["x_test"] = pd.DataFrame(scaler.transform(x_test),columns=x_test.columns)
+        sets[mass]["y_test"] = rotate_vectors([y_test])[0]
 
     return sets
