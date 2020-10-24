@@ -1,11 +1,14 @@
-#data folders
+# Data folders
 processed_data/
 raw_data/
 bdt_output/
 histograms/
 saved_models/
 
-#ipycheckpoints
+# Vscode
+.vscode/
+
+# Ipycheckpoints
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
 

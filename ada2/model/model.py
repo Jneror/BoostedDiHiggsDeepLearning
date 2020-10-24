@@ -349,3 +349,42 @@ class BinClassifModel3(BinaryClassifier):
 
         #name
         self.model_name = "BCM3"
+
+# Created on SPOOKY month 2020
+class FeedForwardNeuralNetworkArchitecture(BinaryClassifier):
+
+    def __init__(self, n_features, lr, opti, acti):
+
+        # Input
+        input_layer = Input(shape=(n_features, ))
+
+        # Hidden layers
+        layer = Dense(32, kernel_initializer='uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(64, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(128, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(256, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(128, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(64, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        layer = Dense(32, kernel_initializer='he_uniform',activation=acti)(input_layer)
+        drop = Dropout(rate=0.2)(layer)
+        
+        # Output
+        output_layer = Dense(1, kernel_initializer="he_uniform", activation='sigmoid')(drop)
+
+        # Model
+        self.model = Model(inputs = input_layer, outputs = output_layer)
+
+        # Compile
+        self.model.compile(optimizer = opti(lr = lr), loss='binary_crossentropy')
+
+        #tTraining
+        self.history = None
+
+        #nName
+        self.model_name = "FFNNA"

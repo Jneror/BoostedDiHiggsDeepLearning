@@ -5,11 +5,14 @@ from root_numpy import tree2array
 from os import path
 from glob import glob
 import json
+from os.path import exists
 
-#sklearn
+#sklearn and keras
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import shuffle
+from keras.backend import clear_session
+import gc
 
 from ada2 import col_names, selected_features, tags
 
@@ -176,6 +179,24 @@ def trainvaltest_split_bymass(x, y, seed, train_size, val_size, test_size, masse
     return (x_train.reset_index(drop=True), x_val.reset_index(drop=True), x_test.reset_index(drop=True),
     y_train, y_val, y_test)
 
+# Added on SPOOKY MONTH 2020
+def trainvaltest_split_bymasstag(x, y, seed, train_size, val_size, test_size, masses):
+    x_mass = {mass: x[x["mass"] == mass] for mass in masses}
+    y_mass = {mass: y[x["mass"] == mass] for mass in masses}
+
+    x_train, x_val, x_test, y_train, y_val, y_test = ({},{},{},{},{},{})
+
+    for t in masses:
+        x_train[t], x_val[t], x_test[t], y_train[t], y_val[t], y_test[t] = trainvaltest_split_bytag(
+            x_mass[t], y_mass[t], seed, train_size, val_size, test_size
+        )
+    x_train, y_train = shuffle(pd.concat(x_train.values()),np.concatenate(list(y_train.values())),random_state=seed)
+    x_val, y_val = shuffle(pd.concat(x_val.values()),np.concatenate(list(y_val.values())),random_state=seed)
+    x_test, y_test =shuffle(pd.concat(x_test.values()),np.concatenate(list(y_test.values())),random_state=seed)
+
+    return (x_train.reset_index(drop=True), x_val.reset_index(drop=True), x_test.reset_index(drop=True),
+    y_train, y_val, y_test)
+
 #added on jun 2020
 def split_dataset(df, train_size, val_size, test_size, seed):
 
@@ -268,5 +289,136 @@ def split_dataset_bymass(df, train_size, val_size, test_size, seed, masses):
         sets[mass]["w_test"] = pop_col_from_dfs([x_test], col_names["weight"])[0]
         sets[mass]["x_test"] = pd.DataFrame(scaler.transform(x_test),columns=x_test.columns)
         sets[mass]["y_test"] = rotate_vectors([y_test])[0]
+
+    return sets
+
+# Added on SPOOKY MONTH 2020
+def split_dataset_bymasstag(df, train_size, val_size, test_size, seed, masses):
+
+    x = df.drop(columns = ["label"])
+    y = df["label"].values
+
+    x_train, x_val, x_test, y_train, y_val, y_test = trainvaltest_split_bymasstag(x,y,seed,train_size,val_size,test_size,masses)
+    x_test_bymass = {mass: x_test[(x_test["mass"] == mass) & (x_test[col_names["tag"]] == 2)]  for mass in masses}
+    y_test_bymass = {mass: y_test[(x_test["mass"] == mass) & (x_test[col_names["tag"]] == 2)]  for mass in masses}
+
+    #object where all the datasets will be stored
+    sets = {}
+
+    #all the sets for train, val and test will be stored here
+    w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
+    sets["w"] = {"train": w_train, "val": w_val, "test": w_test}
+
+    #scale
+    scaler = StandardScaler().fit(x_train)
+    x_train, x_val, x_test = [pd.DataFrame(scaler.transform(df),columns=df.columns) for df in [x_train, x_val, x_test]]
+    sets["x"] = {"train": x_train, "val": x_val, "test": x_test}
+
+    #reshape y
+    y_train, y_val, y_test = rotate_vectors([y_train, y_val, y_test])
+    sets["y"] = {"train": y_train, "val": y_val, "test": y_test}
+
+    for mass in masses:
+        sets[mass] = {}
+        x_test, y_test = (x_test_bymass[mass], y_test_bymass[mass])
+        sets[mass]["w_test"] = pop_col_from_dfs([x_test], col_names["weight"])[0]
+        sets[mass]["x_test"] = pd.DataFrame(scaler.transform(x_test),columns=x_test.columns)
+        sets[mass]["y_test"] = rotate_vectors([y_test])[0]
+
+    return sets
+
+# Added on SPOOKY month 2020
+def f1_hyperparams(BC, sets, split, lr, opti, acti, ths, comb_id, epochs, dest_path):
+
+    print(f"Comb {comb_id}:", split, lr, opti, acti)
+    model = BC(sets["x"]["test"].shape[1], lr, opti, acti)
+
+    if not exists(f"{dest_path}/{model.model_name}_t2_comb{comb_id}.h5"):
+        print("[ ] Training...")
+        model.fit(
+            sets["x"]["train"], sets["y"]["train"], sets["w"]["train"],
+            sets["x"]["val"], sets["y"]["val"], sets["w"]["val"],
+            epochs, verbose = 0,
+        )
+        print("[~] Succesful training"); print("[ ] Saving...")
+        model.save(dest_path, f"t2_comb{comb_id}")
+        print("[~] Succesful saving")
+    else:
+        print("[ ] Loading...")
+        model.load(dest_path, f"t2_comb{comb_id}")
+        print("[~] Succesful loading")
+
+    f1_per_th = pd.DataFrame.from_dict({th: model.f1(
+                        sets["x"]["test"], sets["y"]["test"], sets["w"]["test"], th,
+                    ) for th in ths}, orient="index", columns = [0, 1, "wavg"])
+
+    clear_session()
+    gc.collect()
+    del model
+    
+    return f1_per_th
+
+# Added on SPOOKY month 2020
+def all_hyperparams_comb(model, combs, ths, epochs, dest_path):
+    #get models and f1s
+    n_combs = len(combs)
+    f1_per_comb = [f1_hyperparams(model, *combs[i], ths, i, epochs, dest_path) for i in range(n_combs)]
+    f1_per_comb = pd.concat(f1_per_comb, keys=range(n_combs), names = ["comb", "th"])
+    return f1_per_comb
+
+# Added on SPOOKY monthn 2020
+def trainvaltest_split_bymass_2(x, y, seed, train_size, val_size, test_size, masses):
+
+    x_train, x_val, x_test, y_train, y_val, y_test = ({},{},{},{},{},{})
+    for m in masses:
+        x_train[m], x_val[m], x_test[m], y_train[m], y_val[m], y_test[m] = trainvaltest_split(
+            x[x["mass"] == m], y[x["mass"] == m], seed, train_size, val_size, test_size
+        )
+
+    return x_train, x_val, x_test, y_train, y_val, y_test
+
+def split_dataset_bymass_2(df, train_size, val_size, test_size, seed, masses):
+    x = df.drop(columns = ["label"])
+    y = df["label"].values
+
+    x_train_mass, x_val_mass, x_test_mass, y_train_mass, y_val_mass, y_test_mass = trainvaltest_split_bymass_2(
+        x, y, seed, train_size, val_size, test_size, masses
+    )
+    
+    x_train, y_train = shuffle(
+        pd.concat(x_train_mass.values()), np.concatenate(list(y_train_mass.values())), random_state = seed
+    )
+    x_val, y_val = shuffle(
+        pd.concat(x_val_mass.values()), np.concatenate(list(y_val_mass.values())), random_state = seed
+    )
+    x_test, y_test = shuffle(
+        pd.concat(x_test_mass.values()), np.concatenate(list(y_test_mass.values())), random_state = seed
+    )
+
+    x_train.reset_index(drop = True, inplace = True)
+    x_val.reset_index(drop = True, inplace = True)
+    x_test.reset_index(drop = True, inplace = True)
+
+    #object where all the datasets will be stored
+    sets = {}
+
+    #all the sets for train, val and test will be stored here
+    w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
+    sets["w"] = {"train": w_train, "val": w_val, "test": w_test}
+
+    #scale
+    scaler = StandardScaler().fit(x_train)
+    x_train, x_val, x_test = [pd.DataFrame(scaler.transform(df),columns=df.columns) for df in [x_train, x_val, x_test]]
+    sets["x"] = {"train": x_train, "val": x_val, "test": x_test}
+
+    #reshape y
+    y_train, y_val, y_test = rotate_vectors([y_train, y_val, y_test])
+    sets["y"] = {"train": y_train, "val": y_val, "test": y_test}
+
+    for mass in masses:
+        sets[mass] = {}
+        sets[mass]["w_test"] = pop_col_from_dfs([x_test_mass[mass]], col_names["weight"])[0]
+        sets[mass]["x_test"] = pd.DataFrame(scaler.transform(x_test_mass[mass]),columns=x_test_mass[mass].columns)
+        sets[mass]["y_test"] = rotate_vectors([y_test_mass[mass]])[0]
 
     return sets
