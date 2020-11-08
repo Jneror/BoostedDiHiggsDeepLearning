@@ -1,6 +1,7 @@
 import pandas as pd
 import json
 import numpy as np
+import math
 
 #abstract
 from abc import ABC, abstractmethod
@@ -21,7 +22,7 @@ from sklearn.metrics import f1_score
 #plot
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
-from ada2.plot import plot_train_loss, plot_test_roc, plot_test_recall
+from ada.plot import plot_train_loss, plot_test_roc, plot_test_recall
 
 
 
@@ -33,15 +34,23 @@ class KerasModel(ABC):
         self.title = ""
         self.model_name = ""
     
-    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs, class_weights = {0:1, 1:1}, verbose = 1):
+    def fit(self, X_train, y_train, w_train, X_val, y_val, w_val, epochs, class_weights = None, verbose = 1):
         if self.model is not None:
-            self.history = pd.DataFrame(self.model.fit(
-                X_train.values, y_train, sample_weight = w_train,
-                epochs = epochs,
-                verbose = verbose,
-                validation_data = (X_val.values, y_val, w_val),
-                class_weight = class_weights,
-            ).history)
+            if class_weights != None:
+                self.history = pd.DataFrame(self.model.fit(
+                    X_train.values, y_train, sample_weight = w_train,
+                    epochs = epochs,
+                    verbose = verbose,
+                    validation_data = (X_val.values, y_val, w_val),
+                    class_weight = class_weights,
+                ).history)
+            else:
+                self.history = pd.DataFrame(self.model.fit(
+                    X_train.values, y_train, sample_weight = w_train,
+                    epochs = epochs,
+                    verbose = verbose,
+                    validation_data = (X_val.values, y_val, w_val),
+                ).history)
         else:
             print("Build your model first!")
     
@@ -133,20 +142,18 @@ class Autoencoder(KerasModel):
         super().__init__(n_input)
         self.anomaly_class = anomaly_class
 
-    def fit(self, x_train, w_train, x_val, w_val, epochs):
-        super().fit(x_train, x_train, w_train, x_val, x_val, w_val, epochs)
+    def fit(self, x_train, w_train, x_val, w_val, epochs, verbose = 1):
+        super().fit(x_train, x_train, w_train, x_val, x_val, w_val, epochs, verbose = verbose)
     
-    #added on Jun 2020
     def plot_reconstruction_error(self, x_test, y_test, th):
         x_pred = self.model.predict(x_test)
         errors = np.mean(np.power(x_test.values - x_pred, 2), axis=1)
         color = ListedColormap(["#1f85ad", "#ff7b00"])
-        plt.figure(figsize=(14, 10))
+        plt.figure(figsize=(10, 6))
         plt.scatter(x = range(len(errors)), y = errors, c = y_test.flatten(), s=16, cmap = color)
         plt.axhline(y=th, color='red', linestyle='-')
         plt.show()
     
-    #added on Jun 2020
     def predict(self, x_test, th):
         x_pred = self.model.predict(x_test)
         errors = np.mean(np.power(x_test.values - x_pred, 2), axis=1)
@@ -158,7 +165,6 @@ class Autoencoder(KerasModel):
             
         return y_pred
     
-    #added on Jun 2020
     def plot_confidence_matrix(self, x_test, y_test, th, fmt):
         #prediction
         y_pred = self.predict(x_test, th)
@@ -171,6 +177,24 @@ class Autoencoder(KerasModel):
         plt.ylabel('True class')
         plt.xlabel('Predicted class')
         plt.show()
+    
+    def plot_errors(self, x_test):
+        x_pred = self.model.predict(x_test)
+        errors = np.mean(np.power(x_test.values - x_pred, 2), axis=1)
+        plt.figure(figsize=(10, 6))
+        plt.scatter(x = range(len(errors)), y = errors, s = 16, cmap = "#1f85ad")
+        plt.show()
+    
+    def error_wavg_std(self, x_test, w_test):
+        x_pred = self.model.predict(x_test)
+        errors = np.mean(np.power(x_test.values - x_pred, 2), axis=1)
+
+        wavg = np.average(errors, weights = w_test)
+        variance = np.average((errors-wavg)**2, weights = w_test)
+
+        return (wavg, math.sqrt(variance))
+    
+
 
 class BinaryClassifier(KerasModel):
 
@@ -216,7 +240,7 @@ class BinaryClassifier(KerasModel):
 ### Models ###
 ##############
 
-class BinClassifModelV1(BinaryClassifier):
+class BinaryClassifierModel1(BinaryClassifier):
 
     def __init__(self, n_input):
         #model
@@ -241,16 +265,13 @@ class BinClassifModelV1(BinaryClassifier):
         #compile
         self.model.compile(optimizer=adagrad(lr=0.05), loss='binary_crossentropy')
 
-        #title
-        self.title = 'optimizer: adagrad , lr = 0.05, loss = binary crossentropy'
-
         #training
         self.history = None
 
         #name
-        self.model_name = "BCM1"
+        self.model_name = "BC1"
 
-class AutoencoderModelV1(Autoencoder):
+class AutoencoderModel1(Autoencoder):
 
     def __init__(self, n_features, anomaly_class):
 
@@ -276,118 +297,84 @@ class AutoencoderModelV1(Autoencoder):
         #compile
         self.model.compile(loss='mean_squared_error', optimizer=adam(lr=0.01))
 
-        #title
-        self.title = 'optimizer: adam , lr = 0.01, loss = mean squared error'
-
         #training
         self.history = None
 
         #name
-        self.model_name = "AM1"
+        self.model_name = "A1"
 
         #anomaly class
         self.anomaly_class = anomaly_class
 
-class BinClassifModel2(BinaryClassifier):
+class AutoencoderModelForTuning(Autoencoder):
 
-    def __init__(self, n_input, lr, opti, acti, drop):
-        #model
-        self.model = Sequential()
+    def __init__(self, n_features, anomaly_class, optimizer, lr):
+
         #input
-        self.model.add(Dense(32, input_dim = n_input, kernel_initializer='uniform',activation=acti))
-        #hidden layers
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(256, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(32, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=drop))
-        self.model.add(Dense(1, kernel_initializer="he_uniform", activation='sigmoid'))
-        #compile
-        self.model.compile(optimizer=opti(lr=lr), loss='binary_crossentropy')
+        input_layer = Input(shape = (n_features, ))
 
-        #training
-        self.history = None
+        #encode
+        encoder = Dense(8,kernel_initializer = 'he_uniform',activation = 'relu')(input_layer)
+        drop = Dropout(rate=0.2)(encoder)
 
-        #name
-        self.model_name = "BCM2"
+        #latent
+        latent = Dense(4, kernel_initializer = 'he_uniform',activation = 'relu')(drop)
+        drop = Dropout(rate=0.2)(latent)
 
-class BinClassifModel3(BinaryClassifier):
+        #decode
+        decoder = Dense(8, kernel_initializer = 'he_uniform',activation = 'relu')(drop)
+        drop = Dropout(rate=0.2)(decoder)
 
-    def __init__(self, n_input, lr, opti, acti):
-        #model
-        self.model = Sequential()
-        #input
-        self.model.add(Dense(32, input_dim = n_input, kernel_initializer='uniform',activation=acti))
-        #hidden layers
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(256, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(128, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(64, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(32, kernel_initializer="he_uniform", activation=acti))
-        self.model.add(Dropout(rate=0.2))
-        self.model.add(Dense(1, kernel_initializer="he_uniform", activation='sigmoid'))
-        #compile
-        self.model.compile(optimizer=opti(lr=lr), loss='binary_crossentropy')
-
-        #training
-        self.history = None
-
-        #name
-        self.model_name = "BCM3"
-
-# Created on SPOOKY month 2020
-class FeedForwardNeuralNetworkArchitecture(BinaryClassifier):
-
-    def __init__(self, n_features, lr, opti, acti):
-
-        # Input
-        input_layer = Input(shape=(n_features, ))
-
-        # Hidden layers
-        layer = Dense(32, kernel_initializer='uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(64, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(128, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(256, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(128, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(64, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        layer = Dense(32, kernel_initializer='he_uniform',activation=acti)(input_layer)
-        drop = Dropout(rate=0.2)(layer)
-        
-        # Output
-        output_layer = Dense(1, kernel_initializer="he_uniform", activation='sigmoid')(drop)
-
-        # Model
+        #output
+        output_layer = Dense(n_features, activation = "sigmoid")(drop)
         self.model = Model(inputs = input_layer, outputs = output_layer)
 
-        # Compile
-        self.model.compile(optimizer = opti(lr = lr), loss='binary_crossentropy')
+        #compile
+        self.model.compile(loss='mean_squared_error', optimizer = optimizer(lr))
 
-        # Training
+        #training
         self.history = None
 
-        # Name
-        self.model_name = "FFNNA"
+        #name
+        self.model_name = "AT"
+
+        #anomaly class
+        self.anomaly_class = anomaly_class
+
+class AutoencoderModel2(Autoencoder):
+
+    def __init__(self, n_features, anomaly_class):
+
+        #input
+        input_layer = Input(shape=(n_features, ))
+
+        #encode
+        encoder = Dense(8,kernel_initializer='he_uniform',activation='relu')(input_layer)
+        drop = Dropout(rate=0.2)(encoder)
+
+        #latent
+        latent = Dense(2, kernel_initializer='he_uniform',activation='relu')(drop)
+        drop = Dropout(rate=0.2)(latent)
+
+        #decode
+        decoder = Dense(8, kernel_initializer='he_uniform',activation='relu')(drop)
+        drop = Dropout(rate=0.2)(decoder)
+
+        #output
+        output_layer = Dense(n_features, activation="sigmoid")(drop)
+        self.model = Model(inputs=input_layer, outputs=output_layer)
+
+        #compile
+        self.model.compile(loss='mean_squared_error', optimizer=adamax(lr=0.1))
+
+        #training
+        self.history = None
+
+        #name
+        self.model_name = "A2"
+
+        #anomaly class
+        self.anomaly_class = anomaly_class
 
 # Created on SPOOKY month 2020
 class BinaryClassifierModel4(BinaryClassifier):

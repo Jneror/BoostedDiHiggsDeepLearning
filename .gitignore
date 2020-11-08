@@ -4,6 +4,7 @@ raw_data/
 bdt_output/
 histograms/
 saved_models/
+results/Oct-2020/scores
 
 # Vscode
 .vscode/
