@@ -64,7 +64,7 @@ def preprocess_df(df, signal, region, tag):
     return df.reset_index(drop = True)
 
 #added on jun 2020
-def read_dataset(source_path, signal, bg, region, tag):
+def read_dataset(source_path, signal, bg, region, tag, features = selected_features, includeEventNumber = False):
     signal_df = pd.read_csv(f"{source_path}/{signal}.csv")
     bg_df = pd.read_csv(f"{source_path}/{bg}.csv")
 
@@ -72,8 +72,10 @@ def read_dataset(source_path, signal, bg, region, tag):
     df = preprocess_df(df, signal, region, tag)
 
     cols_to_pop = [col_names["weight"], "label"]
+    if includeEventNumber: cols_to_pop.append("EventNumber")
     if tag is None: cols_to_pop.append(col_names["tag"])
-    df = df[cols_to_pop + selected_features]
+
+    df = df[cols_to_pop + features]
     return df
 
 ####################
@@ -156,6 +158,11 @@ def split_dataset(df, train_size, val_size, test_size, seed):
     #split into train, val and test sets
     x_train, x_val, x_test, y_train, y_val, y_test = trainvaltest_split(x, y, seed, train_size, val_size, test_size)
 
+    #pop event indexes
+    if "EventNumber" in x_train.columns:
+        idx_train, idx_val, idx_test = pop_col_from_dfs([x_train, x_val, x_test], "EventNumber")
+        sets["idx"] = {"train": idx_train, "val": idx_val, "test": idx_test}
+
     #all the sets for train, val and test will be stored here
     w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
     sets["w"] = {"train": w_train, "val": w_val, "test": w_test}
@@ -207,6 +214,11 @@ def split_dataset_by_mass(df, train_size, val_size, test_size, seed, masses):
     #object where all the datasets will be stored
     sets = {}
 
+    #pop event indexes
+    if "EventNumber" in x_train.columns:
+        idx_train, idx_val, idx_test = pop_col_from_dfs([x_train, x_val, x_test], "EventNumber")
+        sets["idx"] = {"train": idx_train, "val": idx_val, "test": idx_test}
+
     #all the sets for train, val and test will be stored here
     w_train, w_val, w_test = pop_col_from_dfs([x_train, x_val, x_test], col_names["weight"])
     sets["w"] = {"train": w_train, "val": w_val, "test": w_test}
@@ -222,6 +234,8 @@ def split_dataset_by_mass(df, train_size, val_size, test_size, seed, masses):
 
     for mass in masses:
         sets[mass] = {}
+        if "EventNumber" in x_test_mass[mass]:
+            sets[mass]["ids_test"] = pop_col_from_dfs([x_test_mass[mass]], "EventNumber")[0]
         sets[mass]["w_test"] = pop_col_from_dfs([x_test_mass[mass]], col_names["weight"])[0]
         sets[mass]["x_test"] = pd.DataFrame(scaler.transform(x_test_mass[mass]),columns=x_test_mass[mass].columns)
         sets[mass]["y_test"] = rotate_vectors([y_test_mass[mass]])[0]
@@ -337,3 +351,9 @@ def scores_per_class_weights(BC, sets, signal_weight, bg_weight_list, th_list, d
     return pd.concat([
         dnn_with_class_weights_scores(BC, sets, bg_weight, signal_weight, th_list, dest_path, title) for bg_weight in bg_weight_list
     ], keys = bg_weight_list, names = ["bg_weight", "th"])
+
+def get_scores_from_json(source_path, filename):
+    with open(f"{source_path}/{filename}", 'r') as json_file:
+        score = json.loads(json_file.read())
+        json_file.close()
+        return score
